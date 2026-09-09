@@ -52,20 +52,20 @@ local function open_float(cols)
 	return win, buf
 end
 
--- (Re)spawn mdcat inside an existing preview buffer.
-local function spawn(bin, cols, file, win, current_buf)
-	-- For a respawn (refresh), the window already exists: wipe the old buffer
-	-- and swap in a fresh one, because termopen requires an unmodified buffer.
+-- (Re)spawn mdcat inside the preview window. Returns the fresh buffer.
+local function spawn(bin, cols, file, win, current_buf, srcbuf)
+	-- Kill the previous render (if still running) and wipe its buffer:
+	-- termopen requires an unmodified buffer, so each render gets a new one.
 	if current_buf and vim.api.nvim_buf_is_valid(current_buf) then
 		local channel = vim.bo[current_buf].channel
 		if channel and channel > 0 then
-			vim.fn.jobstop(channel)
+			pcall(vim.fn.jobstop, channel)
 		end
-		vim.api.nvim_buf_delete(current_buf, { force = true })
+		pcall(vim.api.nvim_buf_delete, current_buf, { force = true })
 	end
 	local buf = current_buf
 	if not buf or not vim.api.nvim_buf_is_valid(buf) then
-		buf = vim.api.nvim_create_buf(false, true)
+		buf = vim.api.nvim_create_buf(true, true) -- listed scratch buffer
 	end
 	if vim.api.nvim_win_is_valid(win) then
 		vim.api.nvim_win_set_buf(win, buf)
@@ -73,10 +73,12 @@ local function spawn(bin, cols, file, win, current_buf)
 	vim.bo[buf].filetype = "mdcat"
 	vim.bo[buf].bufhidden = "wipe"
 
-	-- When the current window IS the preview (float path), don't try to write
-	-- the nofile preview buffer; the source was already saved in preview().
-	if vim.api.nvim_get_current_buf() ~= buf then
-		vim.cmd("silent write")
+	-- Sync the source to disk so the new render sees the current content.
+	-- noautocmd: this internal write must not re-trigger our own BufWritePost.
+	if srcbuf and vim.api.nvim_buf_is_valid(srcbuf) and vim.bo[srcbuf].modified then
+		vim.api.nvim_buf_call(srcbuf, function()
+			vim.cmd("silent noautocmd write")
+		end)
 	end
 
 	local job_id = vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
@@ -135,7 +137,8 @@ function M.preview()
 	vim.cmd("silent write")
 
 	local prev_win = vim.api.nvim_get_current_win()
-	local cols = M.config.columns
+	-- Clamp: the split can never be wider than the screen itself.
+	local cols = math.max(20, math.min(M.config.columns, vim.o.columns - 2))
 
 	local win, buf
 	if M.config.mode == "float" then
@@ -157,7 +160,7 @@ function M.preview()
 	if M.config.mode == "float" then
 		preview_buf = nil -- let spawn pick/create
 	end
-	preview_buf = spawn(bin, cols, file, win, preview_buf)
+	preview_buf = spawn(bin, cols, file, win, preview_buf, src)
 
 	-- Scrollback so you can read past the first screenful.
 	vim.bo[preview_buf].scrollback = 10000
@@ -166,34 +169,42 @@ function M.preview()
 	local pbuf = preview_buf
 
 	local augroup
+	local close
 	if M.config.auto_refresh then
 		augroup = vim.api.nvim_create_augroup("mdcat_preview" .. pbuf, { clear = true })
 		local timer = vim.uv.new_timer()
+		local function refresh()
+			if not vim.api.nvim_buf_is_valid(pbuf) or not vim.api.nvim_buf_is_valid(src) then
+				return
+			end
+			pbuf = spawn(bin, cols, file, win, pbuf, src)
+			vim.bo[pbuf].scrollback = 10000
+			vim.keymap.set("n", "q", close, { buffer = pbuf, nowait = true, silent = true, desc = "Close mdcat preview" })
+			vim.keymap.set("t", "q", [[<C-\><C-n>:lua require("mdcat").close_preview()<CR>]], { buffer = pbuf, silent = true })
+		end
 		vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost" }, {
 			group = augroup,
 			buffer = src,
 			callback = function(ev)
-				if not vim.api.nvim_buf_is_valid(pbuf) then
-					return true -- preview closed: remove autocmds
-				end
+				-- schedule NOW: the API checks below must not run in the
+				-- libuv timer's fast-event context.
 				if ev.event == "BufWritePost" then
-					pbuf = spawn(bin, cols, file, win, nil)
+					vim.schedule(refresh)
 					return
 				end
 				timer:stop()
 				timer:start(M.config.refresh_delay, 0, function()
 					timer:stop()
-					if vim.api.nvim_buf_is_valid(pbuf) and vim.api.nvim_buf_is_valid(src) then
-						vim.schedule(function()
-							pbuf = spawn(bin, cols, file, win, nil)
-						end)
-					end
+					vim.schedule(function()
+						if vim.api.nvim_buf_is_valid(pbuf) and vim.api.nvim_buf_is_valid(src) then
+							refresh()
+						end
+					end)
 				end)
 			end,
 		})
 	end
-
-	local function close()
+	close = function()
 		if augroup then
 			pcall(vim.api.nvim_del_augroup_by_id, augroup)
 		end

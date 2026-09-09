@@ -5,7 +5,7 @@ return {
 	opts = {
 		columns = 80,
 		mode = "vsplit", -- "vsplit" in the current tab, or "float" for a centered floating window
-		auto_refresh = false, -- re-run mdcat when the markdown buffer changes
+		auto_refresh = true, -- re-run mdcat when the markdown buffer changes
 		refresh_delay = 400, -- debounce ms for auto_refresh
 	},
 	-- dir layout doesn't match what lazy expects for auto-detecting the main
