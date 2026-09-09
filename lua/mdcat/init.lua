@@ -61,8 +61,7 @@ function M.preview()
 	-- Focus goes to the preview immediately
 	vim.api.nvim_set_current_win(win)
 
-	vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
-		env = { COLUMNS = tostring(cols) },
+	local job_id = vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
 		on_exit = function()
 			if vim.api.nvim_win_is_valid(win) then
 				vim.api.nvim_win_call(win, function()
@@ -72,12 +71,23 @@ function M.preview()
 		end,
 	})
 
+	-- Force the pty to the intended width so mdcat's --columns is actually
+	-- respected (mdcat caps wrapping to the terminal size otherwise).
+	if job_id and job_id > 0 then
+		vim.fn.jobresize(job_id, cols, vim.api.nvim_win_get_height(win))
+	end
+
+	-- Pin width so subsequent window rearrangement doesn't rewrap the output.
+	vim.wo[win].winfixwidth = true
+
 	-- Terminal buffers spawn in insert mode, which is what makes the output
 	-- look squiggly (block cursor, pending-input state). Drop to normal mode.
 	vim.schedule(function()
 		if vim.api.nvim_win_is_valid(win) then
 			vim.api.nvim_win_call(win, function()
 				vim.cmd("stopinsert")
+				vim.cmd("normal! G")          -- start at bottom like a pager
+				vim.cmd("normal! gg")         -- then top; removes the blank tail
 			end)
 		end
 	end)
