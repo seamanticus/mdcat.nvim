@@ -52,30 +52,27 @@ local function open_float(cols)
 	return win, buf
 end
 
--- (Re)spawn mdcat inside the preview buffer. Returns the buffer used.
--- Reuses `current_buf` when still valid: deleting the buffer that is
--- displayed in the preview window collapses/disturbs the split, so we just
--- stop the old job, reset the terminal buffer and re-attach in place.
+-- (Re)spawn mdcat in the preview window. Returns the buffer used.
+-- Every render gets a BRAND-NEW buffer: reusing a terminal buffer is racy
+-- (the dying job's exit callback flips 'modified' back on asynchronously,
+-- and termopen refuses modified buffers). The old buffer is only wiped
+-- AFTER the new one is displayed, so the window never lacks a buffer and
+-- the split layout stays untouched.
 local function spawn(bin, cols, file, win, current_buf, srcbuf)
-	local buf = current_buf
-	local reuse = buf and vim.api.nvim_buf_is_valid(buf)
-	if reuse then
-		local channel = vim.bo[buf].channel
+	local old = current_buf
+	if old and vim.api.nvim_buf_is_valid(old) then
+		local channel = vim.bo[old].channel
 		if channel and channel > 0 then
 			pcall(vim.fn.jobstop, channel)
 		end
-		-- termopen requires an unmodified, empty buffer: reset it in place.
-		vim.api.nvim_buf_call(buf, function()
-			vim.bo[buf].modified = false
-			vim.bo[buf].modifiable = true
-			pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false, {})
-		end)
-	else
-		buf = vim.api.nvim_create_buf(true, true) -- listed scratch buffer
-		if vim.api.nvim_win_is_valid(win) then
-			vim.api.nvim_win_set_buf(win, buf)
-		end
 	end
+
+	local buf = vim.api.nvim_create_buf(true, true) -- listed scratch buffer
+	if vim.api.nvim_win_is_valid(win) then
+		vim.api.nvim_win_set_buf(win, buf)
+	end
+	-- Old buffer had bufhidden=wipe: now that the window displays `buf`, the
+	-- swap itself wipes the old terminal buffer (and its dying job) cleanly.
 	vim.bo[buf].filetype = "mdcat"
 	vim.bo[buf].bufhidden = "wipe"
 
