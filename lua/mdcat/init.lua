@@ -87,11 +87,30 @@ local function spawn(bin, cols, file, win, current_buf, srcbuf, scroll)
 	vim.api.nvim_buf_call(buf, function()
 		job_id = vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
 			on_exit = function()
-				if vim.api.nvim_win_is_valid(win) then
+				if not vim.api.nvim_win_is_valid(win) then
+					return
+				end
+				-- Render finished: position the view. Applying scroll here (after the
+				-- full output exists) is deterministic; schedules racing the render
+				-- were not.
+				vim.schedule(function()
+					if not vim.api.nvim_win_is_valid(win) or not vim.api.nvim_buf_is_valid(buf) then
+						return
+					end
 					vim.api.nvim_win_call(win, function()
 						vim.cmd("stopinsert")
+						if scroll and scroll > 0 then
+							local lines = vim.api.nvim_buf_line_count(buf)
+							local target = math.max(1, math.floor(lines * scroll))
+							local max_top = math.max(1, lines - vim.api.nvim_win_get_height(win) + 1)
+							target = math.min(target, max_top)
+							pcall(vim.api.nvim_win_set_cursor, win, { target, 0 })
+							vim.cmd("normal! zt")
+						else
+							vim.cmd("normal! gg")
+						end
 					end)
-				end
+				end)
 			end,
 		})
 	end)
@@ -104,37 +123,21 @@ local function spawn(bin, cols, file, win, current_buf, srcbuf, scroll)
 		vim.fn.jobresize(job_id, cols, height)
 	end
 
-	vim.schedule(function()
-		if vim.api.nvim_win_is_valid(win) then
-			vim.api.nvim_win_call(win, function()
-				vim.cmd("stopinsert")
-				if scroll and scroll > 0 then
-					local lines = vim.api.nvim_buf_line_count(buf)
-					local row = math.max(1, math.floor(lines * scroll))
-					pcall(vim.api.nvim_win_set_cursor, win, { row, 0 })
-					vim.cmd("normal! zz")
-				else
-					vim.cmd("normal! gg")
-				end
-			end)
-		end
-	end)
-
 	return buf
 end
 
--- Scroll position of the source buffer's window as a fraction 0..1.
-local function source_scroll_fraction(src)
+-- Source window's top visible line as a fraction 0..1 of the source buffer.
+local function source_top_fraction(src)
 	local ok, winid = pcall(vim.fn.bufwinid, src)
 	if not ok or winid < 0 then
-		return nil -- source not displayed anywhere: keep current position
+		return nil
 	end
-	local cur = vim.api.nvim_win_get_cursor(winid)[1]
+	local view = vim.api.nvim_win_call(winid, vim.fn.winsaveview)
 	local total = vim.api.nvim_buf_line_count(src)
 	if total <= 1 then
 		return 0
 	end
-	return math.min(1, cur / total)
+	return math.min(1, view.topline / total)
 end
 
 function M.preview(mode)
@@ -200,7 +203,7 @@ function M.preview(mode)
 			if not vim.api.nvim_buf_is_valid(pbuf) or not vim.api.nvim_buf_is_valid(src) then
 				return
 			end
-			local scroll = source_scroll_fraction(src)
+			local scroll = source_top_fraction(src)
 			pbuf = spawn(bin, cols, file, win, pbuf, src, scroll)
 			vim.bo[pbuf].scrollback = 10000
 			bind_q(pbuf)
@@ -223,6 +226,58 @@ function M.preview(mode)
 			end,
 		})
 	end
+
+	-- Live scroll sync: whenever the source window scrolls or the cursor moves,
+	-- slide the preview window to the matching rendered top line. No re-render.
+	local scroll_timer = vim.uv.new_timer()
+	local function sync_scroll()
+		if not vim.api.nvim_win_is_valid(win) or not vim.api.nvim_buf_is_valid(pbuf) then
+			return
+		end
+		if not vim.api.nvim_buf_is_valid(src) then
+			return
+		end
+		local frac = source_top_fraction(src)
+		if frac and frac > 0 then
+			local lines = vim.api.nvim_buf_line_count(pbuf)
+			local target = math.max(1, math.floor(lines * frac))
+			local max_top = math.max(1, lines - vim.api.nvim_win_get_height(win) + 1)
+			target = math.min(target, max_top)
+			if vim.fn.line("w0", win) ~= target then
+				vim.api.nvim_win_call(win, function()
+					vim.cmd("stopinsert")
+					pcall(vim.api.nvim_win_set_cursor, win, { target, 0 })
+					vim.cmd("normal! zt")
+				end)
+			end
+		end
+	end
+	vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "WinScrolled" }, {
+		group = augroup,
+		buffer = src,
+		callback = function()
+			scroll_timer:stop()
+			scroll_timer:start(80, 0, function()
+				scroll_timer:stop()
+				vim.schedule(sync_scroll)
+			end)
+		end,
+	})
+	-- WinScrolled is global (pattern matches window id); also catch it for src's
+	-- window when it scrolls without cursor move:
+	vim.api.nvim_create_autocmd("WinScrolled", {
+		group = augroup,
+		callback = function(ev)
+			local swin = vim.fn.bufwinid(src)
+			if swin > 0 and (ev.win == tostring(swin) or ev.match == tostring(swin)) then
+				scroll_timer:stop()
+				scroll_timer:start(80, 0, function()
+					scroll_timer:stop()
+					vim.schedule(sync_scroll)
+				end)
+			end
+		end,
+	})
 
 	close = function()
 		pcall(vim.api.nvim_del_augroup_by_id, augroup)
