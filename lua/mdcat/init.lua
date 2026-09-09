@@ -35,15 +35,16 @@ function M.preview()
 
 	local prev_win = vim.api.nvim_get_current_win()
 
-	vim.cmd("vsplit")
+	local cols = M.config.columns
+
+	-- Create a vertical split whose width is exactly the configured columns,
+	-- so the terminal pty is born at that width. Right side is used.
+	vim.cmd("rightbelow " .. cols .. "vnew")
 	local win = vim.api.nvim_get_current_win()
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.api.nvim_win_set_buf(win, buf)
+	local buf = vim.api.nvim_get_current_buf()
 
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].filetype = "mdcat"
-
-	local cols = M.config.columns
 
 	-- A less "squiggly" surface: no cursor flicker, no line noise.
 	vim.wo[win].number = false
@@ -54,9 +55,7 @@ function M.preview()
 	vim.wo[win].list = false
 	vim.wo[win].wrap = false
 	vim.wo[win].spell = false
-
-	-- Size the split to the requested columns; mdcat wraps to the pty width.
-	vim.api.nvim_win_set_width(win, cols)
+	vim.wo[win].winfixwidth = true
 
 	-- Focus goes to the preview immediately
 	vim.api.nvim_set_current_win(win)
@@ -71,14 +70,11 @@ function M.preview()
 		end,
 	})
 
-	-- Force the pty to the intended width so mdcat's --columns is actually
-	-- respected (mdcat caps wrapping to the terminal size otherwise).
+	-- Safety: resize the pty after spawn in case the window manager adjusted
+	-- the split width before termopen attached.
 	if job_id and job_id > 0 then
 		vim.fn.jobresize(job_id, cols, vim.api.nvim_win_get_height(win))
 	end
-
-	-- Pin width so subsequent window rearrangement doesn't rewrap the output.
-	vim.wo[win].winfixwidth = true
 
 	-- Terminal buffers spawn in insert mode, which is what makes the output
 	-- look squiggly (block cursor, pending-input state). Drop to normal mode.
