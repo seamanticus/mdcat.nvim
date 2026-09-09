@@ -81,15 +81,21 @@ local function spawn(bin, cols, file, win, current_buf, srcbuf)
 		end)
 	end
 
-	local job_id = vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
-		on_exit = function()
-			if vim.api.nvim_win_is_valid(win) then
-				vim.api.nvim_win_call(win, function()
-					vim.cmd("stopinsert")
-				end)
-			end
-		end,
-	})
+	-- termopen attaches to the CURRENT buffer, which may be the user's own
+	-- buffer (e.g. they are typing in the source window). Pin it to ours with
+	-- nvim_buf_call so the terminal always lands in the preview buffer.
+	local job_id
+	vim.api.nvim_buf_call(buf, function()
+		job_id = vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
+			on_exit = function()
+				if vim.api.nvim_win_is_valid(win) then
+					vim.api.nvim_win_call(win, function()
+						vim.cmd("stopinsert")
+					end)
+				end
+			end,
+		})
+	end)
 
 	-- Safety: resize the pty after spawn in case the window manager adjusted
 	-- the split width before termopen attached.
@@ -154,12 +160,11 @@ function M.preview()
 	-- Focus goes to the preview immediately
 	vim.api.nvim_set_current_win(win)
 
-	-- For the vsplit path, spawn directly into the vnew-provided buffer.
-	-- For the float path, spawn returns a buffer (creates one if needed).
-	local preview_buf = buf
-	if M.config.mode == "float" then
-		preview_buf = nil -- let spawn pick/create
-	end
+	-- For the vsplit path, the vnew placeholder is displayed but must not be
+	-- reused: termopen pins to the current buffer, and the placeholder may be
+	-- the current one with no channel. Always spawn into a fresh buffer; the
+	-- placeholder has bufhidden=wipe so it dies on swap.
+	local preview_buf = nil
 	preview_buf = spawn(bin, cols, file, win, preview_buf, src)
 
 	-- Scrollback so you can read past the first screenful.
