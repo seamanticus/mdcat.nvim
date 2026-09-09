@@ -4,25 +4,39 @@ Markdown preview in Neovim using [mdcat](https://github.com/swsnr/mdcat) (availa
 
 ## Install (lazy.nvim)
 
+The plugin lives at `~/src/mdcat.nvim` on the machine running Neovim (adjust the path to wherever you put it):
+
 ```lua
 {
-  dir = "~/path/to/mdcat.nvim", -- or "you/mdcat.nvim" once on GitHub
-  name = "mdcat.nvim",
+  dir = "~/src/mdcat.nvim", -- REAL path to the cloned/copied folder, NOT a placeholder
   ft = "markdown",
   opts = {
     columns = 80, -- wrap width passed to mdcat --columns
   },
   keys = {
-    { "<leader>mm", desc = "Markdown preview (mdcat)" },
+    { "<leader>mm", function() require("mdcat").preview() end, desc = "Markdown preview (mdcat)" },
   },
 }
 ```
 
-Or with local config instead of the plugin's setup:
+(The explicit `function()` handler makes the very first press preview immediately. `setup()` also binds `<leader>mm`, so with `ft = "markdown"` loading alone it works without a `keys` block too.)
+
+If you published it to GitHub as `<youruser>/mdcat.nvim`, use that instead:
 
 ```lua
-require("mdcat").setup({ columns = 100 })
+{ "<youruser>/mdcat.nvim", ft = "markdown", opts = { columns = 80 } }
 ```
+
+### Getting the folder onto your machine
+
+```bash
+# from this machine (scp the whole folder):
+scp -r mdcat.nvim/ yourmachine:~/src/
+# or, once it's a git repo you've pushed:
+git clone https://github.com/<youruser>/mdcat.nvim ~/src/mdcat.nvim
+```
+
+Verify inside Neovim with `:Lazy` — the plugin should be listed as loaded; then `require("mdcat").setup({ columns = 80 })` is already done by `opts`.
 
 ## Usage
 

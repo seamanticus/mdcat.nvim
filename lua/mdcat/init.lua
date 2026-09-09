@@ -43,10 +43,26 @@ function M.preview()
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].filetype = "mdcat"
 
+	local cols = M.config.columns
+
+	-- A less "squiggly" surface: no cursor flicker, no line noise.
+	vim.wo[win].number = false
+	vim.wo[win].relativenumber = false
+	vim.wo[win].signcolumn = "no"
+	vim.wo[win].cursorline = false
+	vim.wo[win].cursorcolumn = false
+	vim.wo[win].list = false
+	vim.wo[win].wrap = false
+	vim.wo[win].spell = false
+
+	-- Size the split to the requested columns; mdcat wraps to the pty width.
+	vim.api.nvim_win_set_width(win, cols)
+
 	-- Focus goes to the preview immediately
 	vim.api.nvim_set_current_win(win)
 
-	vim.fn.termopen({ bin, "--columns", tostring(M.config.columns), file }, {
+	vim.fn.termopen({ bin, "--columns", tostring(cols), file }, {
+		env = { COLUMNS = tostring(cols) },
 		on_exit = function()
 			if vim.api.nvim_win_is_valid(win) then
 				vim.api.nvim_win_call(win, function()
@@ -55,6 +71,19 @@ function M.preview()
 			end
 		end,
 	})
+
+	-- Terminal buffers spawn in insert mode, which is what makes the output
+	-- look squiggly (block cursor, pending-input state). Drop to normal mode.
+	vim.schedule(function()
+		if vim.api.nvim_win_is_valid(win) then
+			vim.api.nvim_win_call(win, function()
+				vim.cmd("stopinsert")
+			end)
+		end
+	end)
+
+	-- Scrollback so you can read past the first screenful.
+	vim.api.nvim_buf_set_option(buf, "scrollback", 10000)
 
 	local function close()
 		if vim.api.nvim_win_is_valid(win) then
