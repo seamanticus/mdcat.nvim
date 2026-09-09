@@ -282,20 +282,34 @@ function M.preview(mode)
 	close = function()
 		pcall(vim.api.nvim_del_augroup_by_id, augroup)
 		if vim.api.nvim_win_is_valid(win) then
-			vim.api.nvim_win_close(win, true)
+			-- E444 guard: Neovim refuses to close the last remaining window
+			-- (e.g. you :q the markdown and the preview is all that's left).
+			-- Drop the terminal buffer instead and leave an empty window.
+			local ok = pcall(vim.api.nvim_win_close, win, true)
+			if not ok and vim.api.nvim_buf_is_valid(pbuf) then
+				pcall(vim.api.nvim_buf_delete, pbuf, { force = true })
+			end
 		end
 		if vim.api.nvim_win_is_valid(prev_win) then
 			vim.api.nvim_set_current_win(prev_win)
 		end
 	end
 
-	-- Collapse the preview when the source buffer or its window goes away.
+	-- Collapse the preview when the source disappears: buffer deleted, its
+	-- window closed, or (float case — floats don't trigger WinClosed on the
+	-- source) the source simply stops being displayed.
 	vim.api.nvim_create_autocmd("BufDelete", {
 		group = augroup,
 		buffer = src,
 		callback = function()
 			-- BufDelete runs inside the delete; defer to a safe point.
-			vim.schedule(close)
+			vim.schedule(function()
+				if not vim.api.nvim_buf_is_valid(src)
+					or vim.fn.bufwinid(src) == -1
+				then
+					close()
+				end
+			end)
 		end,
 	})
 	vim.api.nvim_create_autocmd("WinClosed", {
@@ -304,6 +318,31 @@ function M.preview(mode)
 			if tonumber(ev.match) == src_win then
 				vim.schedule(close)
 			end
+		end,
+	})
+	-- Wipeout covers :bw / :bdelete! paths BufDelete sometimes misses for
+	-- modified buffers.
+	vim.api.nvim_create_autocmd("BufWipeout", {
+		group = augroup,
+		buffer = src,
+		callback = function()
+			vim.schedule(close)
+		end,
+	})
+	-- Float case: quitting the source window doesn't fire WinClosed for it in a
+	-- way we reliably see before the float is orphaned. Recheck on every window
+	-- switch: if the source buffer is gone or no longer displayed, close.
+	vim.api.nvim_create_autocmd("WinEnter", {
+		group = augroup,
+		callback = function()
+			vim.schedule(function()
+				if not vim.api.nvim_win_is_valid(win) then
+					return
+				end
+				if not vim.api.nvim_buf_is_valid(src) or vim.fn.bufwinid(src) == -1 then
+					close()
+				end
+			end)
 		end,
 	})
 
