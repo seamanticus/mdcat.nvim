@@ -38,7 +38,7 @@ Every other markdown preview asks you to compromise. Browser-based previewers dr
 
 ```lua
 {
-  "sail3r/mdcat.nvim",
+  "seamanticus/mdcat.nvim",
   ft = "markdown",
   opts = {
     columns = 90, -- render width; the preview window is sized to match
@@ -55,7 +55,7 @@ lazy.nvim auto-detects `lua/mdcat/init.lua` as the main module, so `opts` flow s
 Loading it locally instead (development checkout):
 
 ```lua
-{ dir = "~/repos/sail3r/mdcat.nvim", ft = "markdown", opts = {} },
+{ dir = "~/repos/seamanticus/mdcat.nvim", ft = "markdown", opts = {} },
 ```
 
 Any other plugin manager or a manual setup works too:
