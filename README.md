@@ -20,17 +20,18 @@ Every other markdown preview asks you to compromise. Browser-based previewers dr
 ### How it stacks up
 
 | | mdcat.nvim | markdown-preview.nvim | peek.nvim | glow.nvim | render-markdown.nvim |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | Where it renders | Neovim buffer (terminal) | external browser | external browser | floating TUI | in-buffer conceal |
 | Live refresh while editing | ✅ automatic | on save | on save | ❌ | decorations only |
 | Follows your cursor | ✅ anchored, exact | scroll-linked | ❌ | ❌ | n/a |
 | vsplit + floating views | ✅ both | browser window | browser window | float only | n/a |
 | Runtime dependencies | `mdcat` | Node.js + server | Deno | `glow` | none |
 
-## Requirements
+## System Requirements
 
 - Neovim ≥ 0.10
-- [`mdcat`](https://github.com/swsnr/mdcat) ≥ 2.0 on your `$PATH` — Arch: `sudo pacman -S mdcat`; elsewhere: `cargo install mdcat` or grab a [release](https://github.com/swsnr/mdcat/releases)
+
+- [`mdcat`](https://github.com/swsnr/mdcat) ≥ 2.0 on your `$PATH`.
 
 ## Install
 
@@ -38,44 +39,28 @@ Every other markdown preview asks you to compromise. Browser-based previewers dr
 
 ```lua
 {
-  "seamanticus/mdcat.nvim",
-  ft = "markdown",
-  opts = {
-    columns = 90, -- render width; the preview window is sized to match
-  },
-  keys = {
-    { "<leader>mv", function() require("mdcat").preview("vsplit") end, ft = "markdown", desc = "Markdown preview (vsplit)" },
-    { "<leader>mp", function() require("mdcat").preview("float") end, ft = "markdown", desc = "Markdown preview (float)" },
-  },
+    "seamanticus/mdcat.nvim",
+    ft = "markdown",
+
+    opts = {
+        columns = 90,           -- render width passed to `mdcat --columns`
+        auto_refresh = true,    -- re-render the preview as the source buffer changes
+        refresh_delay = 200,    -- debounce (ms) for auto_refresh
+        scroll_sync = true,     -- keep the preview anchored to the source cursor line
+        scroll_sync_delay = 40, -- debounce (ms) for scroll sync
+    },
+
+    keys = {
+        { "<leader>mv", function() require("mdcat").preview("vsplit") end, ft = "markdown", desc = "Markdown preview (vsplit)" },
+        { "<leader>mp", function() require("mdcat").preview("float") end, ft = "markdown", desc = "Markdown preview (float)" },
+    },
 }
-```
-
-lazy.nvim auto-detects `lua/mdcat/init.lua` as the main module, so `opts` flow straight into `setup()` — no `config` hook needed.
-
-Loading it locally instead (development checkout):
-
-```lua
-{ dir = "~/repos/seamanticus/mdcat.nvim", ft = "markdown", opts = {} },
 ```
 
 Any other plugin manager or a manual setup works too:
 
 ```lua
 require("mdcat").setup({ columns = 90 })
-```
-
-### Configuration
-
-All options, with their defaults:
-
-```lua
-opts = {
-  columns = 90,           -- render width passed to `mdcat --columns`
-  auto_refresh = true,    -- re-render the preview as the source buffer changes
-  refresh_delay = 200,    -- debounce (ms) for auto_refresh
-  scroll_sync = true,     -- keep the preview anchored to the source cursor line
-  scroll_sync_delay = 40, -- debounce (ms) for scroll sync
-}
 ```
 
 ## Usage
